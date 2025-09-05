@@ -1,2 +1,0 @@
-/*pull test*/
-print("pull")
