@@ -1,0 +1,779 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <base target="_top">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Inter', sans-serif; background-color: #f7f9fc; }
+        .data-table-container { max-height: 60vh; overflow-y: auto; }
+        /* 테이블 헤더 고정 스타일 */
+        .data-table-container table { width: 100%; border-collapse: separate; border-spacing: 0; }
+        .data-table-container th { position: sticky; top: 0; background-color: #e5e7eb; z-index: 10; }
+    </style>
+</head>
+<body class="p-4 sm:p-8">
+
+    <div class="max-w-4xl mx-auto bg-white shadow-xl rounded-2xl p-6 sm:p-8">
+        <h1 class="text-3xl font-bold text-gray-800 mb-6 pb-3">Google Sheet 데이터 관리 (CRUD)</h1>
+        
+        <!-- Tab Navigation Menu (동적 탭 컨테이너) -->
+        <div id="tabs-container" class="flex border-b border-gray-200 mb-6 -mt-3 overflow-x-auto whitespace-nowrap">
+            <!-- 탭이 여기에 동적으로 렌더링됩니다 -->
+        </div>
+        
+        <!-- 메시지 및 로딩 영역 -->
+        <div id="loading-spinner" class="hidden text-center py-4">
+            <svg class="animate-spin -ml-1 mr-3 h-5 w-5 text-indigo-600 inline-block" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+            </svg>
+            <span class="text-gray-600">데이터를 불러오는 중...</span>
+        </div>
+
+        <!-- DATA VIEW CONTAINER (데이터 조회, CRUD 기능 관련 UI) -->
+        <div id="data-view-container" class="hidden">
+            <!-- 액션 버튼 및 검색 영역 -->
+            <div class="flex flex-col sm:flex-row justify-between items-stretch sm:items-center gap-4 mb-6">
+                <!-- 검색 영역 -->
+                <div class="flex flex-grow max-w-lg space-x-2">
+                    <input type="text" id="search-input" placeholder="검색어를 입력하세요..."
+                           class="flex-grow px-4 py-2 border border-gray-300 rounded-xl focus:ring-blue-500 focus:border-blue-500 transition duration-150 shadow-sm">
+                    <button id="search-btn" class="bg-blue-600 hover:bg-blue-700 text-white font-semibold py-2 px-4 rounded-xl shadow-lg transition duration-300 transform hover:scale-[1.02]">
+                        조회
+                    </button>
+                </div>
+                
+                <!-- 새 레코드 등록 버튼 -->
+                <button id="add-btn" class="bg-indigo-600 hover:bg-indigo-700 text-white font-semibold py-2 px-4 rounded-xl shadow-lg transition duration-300 transform hover:scale-[1.02] sm:w-auto w-full">
+                    새 레코드 등록
+                </button>
+            </div>
+
+            <!-- 데이터 테이블 -->
+            <div class="data-table-container border rounded-xl overflow-hidden shadow-inner">
+                <table class="min-w-full divide-y divide-gray-200">
+                    <thead class="bg-gray-100">
+                        <tr id="table-header-row">
+                            <!-- 헤더는 JS에서 동적으로 렌더링됩니다 -->
+                        </tr>
+                    </thead>
+                    <tbody id="data-table-body" class="bg-white divide-y divide-gray-100">
+                        <!-- 데이터는 여기에 삽입됩니다 -->
+                    </tbody>
+                </table>
+            </div>
+            <div id="no-data-message" class="hidden text-center py-6 text-gray-500 italic">
+                등록된 데이터가 없습니다. 새로운 레코드를 추가해 보세요.
+            </div>
+        </div>
+        <!-- END DATA VIEW CONTAINER -->
+
+        <!-- ADMIN VIEW CONTAINER (시트 구성 등록 기능) -->
+        <div id="admin-view-container" class="hidden p-4 border border-gray-200 rounded-xl bg-gray-50">
+            <h2 class="text-xl font-bold mb-4 text-gray-700">새 시트 구성 등록</h2>
+            <p class="text-sm text-gray-500 mb-6">새로운 Google Sheet 시트를 생성하고, 해당 시트의 헤더를 정의하여 메인 화면에 조회 탭을 추가합니다. 등록된 정보는 **SHEET_DATA** 시트에 저장됩니다. (새로고침 후 반영)</p>
+            <form id="sheet-config-form" class="space-y-4">
+                <div class="grid sm:grid-cols-2 gap-4">
+                    <div>
+                        <label for="newSheetName" class="block text-sm font-medium text-gray-700">시트 이름 (필수, 실제 시트명)</label>
+                        <input type="text" id="newSheetName" name="sheetName" required 
+                               class="mt-1 w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-indigo-500 focus:border-indigo-500" 
+                               placeholder="예: 'CLIENT_DB'">
+                    </div>
+                    <div>
+                        <label for="newSheetTitle" class="block text-sm font-medium text-gray-700">탭 표시 이름 (필수, 화면 표시명)</label>
+                        <input type="text" id="newSheetTitle" name="title" required 
+                               class="mt-1 w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-indigo-500 focus:border-indigo-500" 
+                               placeholder="예: '고객 데이터 조회'">
+                    </div>
+                </div>
+                
+                <div>
+                    <label for="newSheetHeaders" class="block text-sm font-medium text-gray-700">헤더 목록 (필수, 쉼표로 구분)</label>
+                    <textarea id="newSheetHeaders" name="headers" rows="3" required
+                              class="mt-1 w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-indigo-500 focus:border-indigo-500" 
+                              placeholder="예: 이름, 연락처, 가입일, 담당자"></textarea>
+                    <p class="text-xs text-gray-400 mt-1">헤더 순서대로 영문 키가 자동 생성됩니다.</p>
+                </div>
+                
+                <div class="grid sm:grid-cols-2 gap-4">
+                    <div>
+                        <label for="newSheetOrder" class="block text-sm font-medium text-gray-700">탭 순서 (숫자)</label>
+                        <input type="number" id="newSheetOrder" name="order" value="10"
+                               class="mt-1 w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-indigo-500 focus:border-indigo-500" 
+                               placeholder="탭의 정렬 순서 (숫자가 낮을수록 앞)">
+                    </div>
+                    
+                    <!-- 노출여부 필드 -->
+                    <div>
+                        <label for="newSheetExposure" class="block text-sm font-medium text-gray-700">노출 여부</label>
+                        <select id="newSheetExposure" name="exposure" 
+                                class="mt-1 w-full px-3 py-2 border border-gray-300 bg-white rounded-lg focus:ring-indigo-500 focus:border-indigo-500 transition duration-150">
+                            <option value="Y" selected>Y (노출)</option>
+                            <option value="N">N (숨김)</option>
+                        </select>
+                        <p class="text-xs text-gray-400 mt-1">N 선택 시 메인 화면 탭에서 숨겨집니다.</p>
+                    </div>
+                </div>
+
+                <div class="flex justify-end">
+                    <button type="submit" id="create-sheet-btn" class="bg-green-600 hover:bg-green-700 text-white font-semibold py-2 px-4 rounded-xl shadow-md transition duration-150">
+                        시트 생성 및 탭 등록
+                    </button>
+                </div>
+            </form>
+        </div>
+        <!-- END ADMIN VIEW CONTAINER -->
+
+    </div>
+
+    <!-- CRUD Modal (동적으로 필드가 변경됨) -->
+    <div id="crud-modal" class="fixed inset-0 bg-gray-900 bg-opacity-75 backdrop-blur-sm hidden items-center justify-center p-4 z-50 transition duration-300">
+        <div class="bg-white rounded-xl shadow-2xl w-full max-w-md p-6 transform transition-all scale-100">
+            <h2 id="modal-title" class="text-2xl font-bold mb-4 text-gray-800">새 레코드 등록</h2>
+            <form id="crud-form">
+                <input type="hidden" id="rowIndex" name="rowIndex">
+                
+                <!-- 폼 필드 동적 생성 영역 -->
+                <div id="form-fields-container">
+                    <!-- 필드가 여기에 삽입됩니다 -->
+                </div>
+
+                <div class="flex justify-end space-x-3 mt-6">
+                    <button type="button" id="close-modal-btn" class="bg-gray-200 hover:bg-gray-300 text-gray-800 font-semibold py-2 px-4 rounded-xl transition duration-150">
+                        취소
+                    </button>
+                    <button type="submit" class="bg-indigo-600 hover:bg-indigo-700 text-white font-semibold py-2 px-4 rounded-xl shadow-md transition duration-150" id="save-btn">
+                        등록
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Confirm Delete Modal -->
+    <div id="confirm-modal" class="fixed inset-0 bg-gray-900 bg-opacity-75 backdrop-blur-sm hidden items-center justify-center p-4 z-50 transition duration-300">
+        <div class="bg-white rounded-xl shadow-2xl w-full max-w-sm p-6 transform transition-all scale-100">
+            <h2 class="text-xl font-bold mb-4 text-red-600">삭제 확인</h2>
+            <p class="mb-6 text-gray-600">정말로 이 레코드를 삭제하시겠습니까? 이 작업은 되돌릴 수 없습니다.</p>
+            <input type="hidden" id="deleteRowIndex">
+            <div class="flex justify-end space-x-3">
+                <button type="button" id="cancel-delete-btn" class="bg-gray-200 hover:bg-gray-300 text-gray-800 font-semibold py-2 px-4 rounded-xl transition duration-150">
+                    취소
+                </button>
+                <button type="button" id="confirm-delete-btn" class="bg-red-600 hover:bg-red-700 text-white font-semibold py-2 px-4 rounded-xl shadow-md transition duration-150">
+                    삭제
+                </button>
+            </div>
+        </div>
+    </div>
+    
+    <!-- 메시지 박스 컨테이너 (하단 우측 고정) -->
+    <div id="message-box" class="fixed bottom-5 right-5 w-80 p-3 mb-4 rounded-lg text-sm transition duration-300 hidden shadow-xl" role="alert"></div>
+
+
+    <script>
+        // --- 전역 변수 설정 ---
+        const tableBody = document.getElementById('data-table-body');
+        const tableHeaderRow = document.getElementById('table-header-row');
+        const modal = document.getElementById('crud-modal');
+        const confirmModal = document.getElementById('confirm-modal');
+        const crudForm = document.getElementById('crud-form');
+        const saveBtn = document.getElementById('save-btn');
+        const modalTitle = document.getElementById('modal-title');
+        const loadingSpinner = document.getElementById('loading-spinner');
+        const messageBox = document.getElementById('message-box');
+        const noDataMessage = document.getElementById('no-data-message');
+        const searchInput = document.getElementById('search-input');
+        const searchBtn = document.getElementById('search-btn');
+        const addBtn = document.getElementById('add-btn');
+        const formFieldsContainer = document.getElementById('form-fields-container');
+        const tabsContainer = document.getElementById('tabs-container');
+        const dataViewContainer = document.getElementById('data-view-container');
+        const adminViewContainer = document.getElementById('admin-view-container');
+        const sheetConfigForm = document.getElementById('sheet-config-form');
+
+        let viewConfigs = [
+            {
+                viewName: 'admin',
+                title: '관리자 (시트 등록)',
+                isAdmin: true,
+                order: 9999
+            }
+        ];
+        
+        let viewMap = new Map();
+        viewMap.set('admin', viewConfigs[0]);
+
+        let currentView = 'admin'; 
+
+        function getCurrentConfig() {
+            return viewMap.get(currentView);
+        }
+
+        /**
+         * 메시지 상자를 표시합니다. (하단 우측 고정)
+         */
+        function showMessage(message, type = 'success') {
+            messageBox.textContent = message;
+            messageBox.classList.remove('hidden', 'bg-green-100', 'text-green-800', 'bg-red-100', 'text-red-800', 'bg-blue-100', 'text-blue-800');
+            
+            if (type === 'success') {
+                messageBox.classList.add('bg-green-100', 'text-green-800');
+            } else if (type === 'error') {
+                messageBox.classList.add('bg-red-100', 'text-red-800');
+            } else {
+                messageBox.classList.add('bg-blue-100', 'text-blue-800');
+            }
+            messageBox.classList.remove('hidden');
+
+            setTimeout(() => {
+                messageBox.classList.add('hidden');
+            }, 5000);
+        }
+
+        /**
+         * 서버 요청 전 로딩 상태를 설정합니다.
+         */
+        function setLoading(isLoading) {
+            if (isLoading) {
+                loadingSpinner.classList.remove('hidden');
+            } else {
+                loadingSpinner.classList.add('hidden');
+            }
+        }
+
+        /**
+         * 뷰에 따라 테이블 헤더를 렌더링합니다.
+         */
+        function renderHeaders(viewName) {
+            const config = viewMap.get(viewName);
+            tableHeaderRow.innerHTML = '';
+
+            if (config.isAdmin) return; 
+
+            // 1. 모든 데이터 헤더 (N개)를 순서대로 추가
+            config.headers.forEach((header, index) => {
+                const th = document.createElement('th');
+                th.className = 'px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider';
+                th.textContent = header;
+                if (index === 0) th.classList.add('rounded-tl-xl');
+                
+                tableHeaderRow.appendChild(th);
+            });
+            
+            // 2. '작업' 헤더를 별도로 추가 (N+1번째 컬럼)
+            const actionTh = document.createElement('th');
+            actionTh.className = 'px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider rounded-tr-xl';
+            actionTh.textContent = '작업';
+            tableHeaderRow.appendChild(actionTh);
+        }
+
+
+        /**
+         * 서버에서 데이터를 성공적으로 불러온 후 테이블을 렌더링합니다.
+         */
+        function renderTable(response) {
+            setLoading(false);
+            tableBody.innerHTML = ''; 
+            const config = getCurrentConfig();
+
+            if (response && response.error) {
+                showMessage('데이터 로딩 실패: ' + response.error, 'error');
+                noDataMessage.classList.add('hidden');
+                return;
+            }
+
+            const data = response || [];
+
+            if (data.length === 0) {
+                noDataMessage.textContent = `${config.title}의 등록된 데이터가 없습니다.`;
+                noDataMessage.classList.remove('hidden');
+                return;
+            }
+
+            noDataMessage.classList.add('hidden');
+
+            data.forEach((record) => {
+                const row = tableBody.insertRow();
+                row.className = 'hover:bg-gray-50';
+
+                // 모든 데이터 필드 (N개)를 keys 배열을 기반으로 출력
+                config.keys.forEach(key => {
+                    const cell = row.insertCell();
+                    cell.className = 'px-4 py-3 whitespace-nowrap text-sm text-gray-700';
+                    
+                    let displayValue = record[key];
+                    
+                    if ((key.toLowerCase().includes('date') || config.headers[config.keys.indexOf(key)].includes('일')) && typeof displayValue === 'string' && displayValue.match(/^\d{4}-\d{2}-\d{2}$/)) {
+                       // 날짜 형식으로 가정되는 경우 (주: input type=date 와의 연관성은 없음)
+                    } else {
+                        displayValue = displayValue === null || typeof displayValue === 'undefined' ? '' : displayValue;
+                    }
+
+                    cell.textContent = displayValue;
+                });
+
+                // 작업 버튼 셀 (N+1번째 컬럼)
+                const actionCell = row.insertCell();
+                actionCell.className = 'px-4 py-3 whitespace-nowrap text-sm font-medium text-center';
+
+                const editBtn = document.createElement('button');
+                editBtn.textContent = '수정';
+                editBtn.className = 'text-indigo-600 hover:text-indigo-900 mr-2 font-medium transition duration-150';
+                editBtn.onclick = () => openModal(record);
+
+                const deleteBtn = document.createElement('button');
+                deleteBtn.textContent = '삭제';
+                deleteBtn.className = 'text-red-600 hover:text-red-900 font-medium transition duration-150';
+                deleteBtn.onclick = () => openConfirmModal(record.rowIndex);
+
+                actionCell.appendChild(editBtn);
+                actionCell.appendChild(deleteBtn);
+            });
+        }
+
+        /**
+         * 데이터 로딩을 수행합니다.
+         */
+        function loadData() {
+            const config = getCurrentConfig();
+            if (config.isAdmin) return;
+
+            setLoading(true);
+
+            const searchQuery = searchInput.value.trim();
+            
+            google.script.run
+                .withSuccessHandler(renderTable)
+                .withFailureHandler((error) => {
+                    setLoading(false);
+                    showMessage('데이터 로딩 중 서버 오류가 발생했습니다: ' + error, 'error');
+                })
+                .getSpreadsheetData(config.sheetName, config.keys, searchQuery);
+        }
+        
+        /**
+         * 모든 탭 버튼을 동적으로 렌더링합니다.
+         */
+        function renderTabs() {
+            tabsContainer.innerHTML = '';
+            
+            // viewConfigs 배열을 순서(order) 기준으로 정렬
+            viewConfigs.sort((a, b) => a.order - b.order);
+
+            viewConfigs.forEach(config => {
+                // viewConfigs에는 이미 노출될 탭(isAdmin=true 또는 exposure='Y')만 포함되어 있습니다.
+                const button = document.createElement('button');
+                const isSelected = config.viewName === currentView;
+                button.id = `tab-${config.viewName}`;
+                button.dataset.view = config.viewName;
+                button.textContent = config.title;
+                button.className = `tab-btn py-2 px-6 text-sm font-medium border-b-2 transition duration-150 ease-in-out ${
+                    isSelected ? 'border-indigo-600 text-indigo-600' : 'border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700'
+                }`;
+                button.onclick = () => switchView(config.viewName);
+                tabsContainer.appendChild(button);
+            });
+        }
+
+
+        /**
+         * 뷰를 전환하고 UI를 업데이트합니다.
+         */
+        function switchView(newView) {
+            currentView = newView;
+            const config = getCurrentConfig();
+
+            renderTabs(); 
+
+            // 뷰 컨테이너 토글
+            if (config.isAdmin) {
+                dataViewContainer.classList.add('hidden');
+                adminViewContainer.classList.remove('hidden');
+                
+            } else {
+                dataViewContainer.classList.remove('hidden');
+                adminViewContainer.classList.add('hidden');
+
+                searchInput.value = '';
+                // 동적으로 설정된 placeholder 사용
+                searchInput.placeholder = config.placeholder || `${config.title} 검색...`;
+                
+                renderHeaders(newView);
+                loadData();
+            }
+        }
+        
+        /**
+         * Admin 폼 제출 핸들러 (새 시트 구성 등록)
+         */
+        sheetConfigForm.addEventListener('submit', function(e) {
+            e.preventDefault();
+            
+            const sheetName = document.getElementById('newSheetName').value.trim();
+            const title = document.getElementById('newSheetTitle').value.trim();
+            const headersStr = document.getElementById('newSheetHeaders').value.trim();
+            const order = document.getElementById('newSheetOrder').value.trim();
+            const exposure = document.getElementById('newSheetExposure').value; 
+            
+            if (!sheetName || !title || !headersStr) {
+                showMessage('시트 이름, 탭 표시 이름, 헤더 목록은 필수 항목입니다.', 'error');
+                return;
+            }
+
+            const headers = headersStr.split(',').map(h => h.trim()).filter(h => h.length > 0);
+            if (headers.length === 0) {
+                showMessage('최소한 하나의 헤더를 입력해야 합니다.', 'error');
+                return;
+            }
+            
+            setLoading(true);
+
+            // 서버 전송 데이터 준비 (노출여부 추가)
+            const configData = {
+                sheetName: sheetName,
+                title: title,
+                headers: headers,
+                order: order,
+                exposure: exposure 
+            };
+
+
+            // 백엔드 함수 호출 (시트 생성 및 SHEET_DATA에 구성 저장)
+            google.script.run
+                .withSuccessHandler((res) => {
+                    setLoading(false);
+                    if (res.success) {
+                        showMessage(res.message, 'success');
+                        sheetConfigForm.reset();
+                        // 성공적으로 등록되었으므로, 앱을 재초기화하여 새 설정을 로드
+                        initializeApp(true); 
+
+                    } else {
+                        showMessage(res.message, 'error');
+                    }
+                })
+                .withFailureHandler((error) => {
+                    setLoading(false);
+                    showMessage('시트 구성 등록 중 서버 오류가 발생했습니다: ' + error, 'error');
+                })
+                .createSheetConfig(configData); 
+        });
+
+
+        /**
+         * 현재 뷰 설정에 따라 모달의 폼 필드를 동적으로 생성합니다.
+         */
+        function renderFormFields() {
+            const config = getCurrentConfig();
+            formFieldsContainer.innerHTML = '';
+            
+            if (config.isAdmin || !config.formFields) return; 
+
+            config.formFields.forEach(field => {
+                const div = document.createElement('div');
+                div.className = 'mb-4';
+                
+                const label = document.createElement('label');
+                label.htmlFor = field.key;
+                label.className = 'block text-sm font-medium text-gray-700 mb-1';
+                label.textContent = field.label;
+                
+                let inputElement;
+                let inputType = field.type;
+
+                // 날짜 필드를 위한 단순한 추론
+                if (field.label.includes('일') || field.label.toLowerCase().includes('date')) {
+                   inputType = 'date';
+                }
+
+                if (inputType === 'textarea') {
+                    inputElement = document.createElement('textarea');
+                    inputElement.rows = 3;
+                } else {
+                    inputElement = document.createElement('input');
+                    inputElement.type = inputType;
+                }
+
+                inputElement.id = field.key;
+                inputElement.name = field.key;
+                if (field.required) inputElement.required = true;
+                
+                inputElement.className = 'w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-indigo-500 focus:border-indigo-500 transition duration-150';
+
+                div.appendChild(label);
+                div.appendChild(inputElement);
+                formFieldsContainer.appendChild(div);
+            });
+        }
+
+        /**
+         * CRUD 모달을 엽니다.
+         */
+        function openModal(record = null) {
+            crudForm.reset();
+            const config = getCurrentConfig();
+            
+            renderFormFields();
+            
+            const rowIndexInput = document.getElementById('rowIndex');
+
+            if (record) {
+                // 수정 모드
+                modalTitle.textContent = `${config.title} 수정`;
+                saveBtn.textContent = '수정';
+                rowIndexInput.value = record.rowIndex;
+                
+                // 데이터 바인딩
+                config.keys.forEach(key => {
+                    const input = document.getElementById(key);
+                    let value = record[key];
+                    
+                    if (input) {
+                        input.value = value;
+                    }
+                });
+
+            } else {
+                // 등록 모드
+                modalTitle.textContent = `새 ${config.title} 등록`;
+                saveBtn.textContent = '등록';
+                rowIndexInput.value = '';
+            }
+            modal.classList.remove('hidden');
+            modal.classList.add('flex');
+        }
+
+        /**
+         * 모달을 닫습니다.
+         */
+        function closeModal() {
+            modal.classList.add('hidden');
+            modal.classList.remove('flex');
+        }
+
+        /**
+         * 삭제 확인 모달을 엽니다.
+         */
+        function openConfirmModal(rowIndex) {
+            document.getElementById('deleteRowIndex').value = rowIndex;
+            confirmModal.classList.remove('hidden');
+            confirmModal.classList.add('flex');
+        }
+
+        /**
+         * 삭제 확인 모달을 닫습니다.
+         */
+        function closeConfirmModal() {
+            confirmModal.classList.add('hidden');
+            confirmModal.classList.remove('flex');
+        }
+
+        /**
+         * 폼 제출 핸들러 (등록 또는 수정)
+         */
+        function handleFormSubmit(e) {
+            e.preventDefault();
+            
+            const config = getCurrentConfig();
+            const formData = new FormData(crudForm);
+            const record = {};
+            
+            // config.keys 배열에 정의된 필드만 추출하여 record 객체 생성
+            config.keys.forEach(key => {
+                record[key] = formData.get(key);
+            });
+
+            const rowIndex = formData.get('rowIndex');
+
+            setLoading(true);
+            closeModal();
+
+            const successHandler = (res) => {
+                setLoading(false);
+                loadData();
+                if (res.error) {
+                    showMessage('작업 실패: ' + res.error, 'error');
+                } else {
+                    showMessage(res.message);
+                }
+            };
+
+            const errorHandler = (error) => {
+                setLoading(false);
+                showMessage('서버 통신 오류: ' + error, 'error');
+            };
+
+            if (rowIndex) {
+                // 수정
+                google.script.run
+                    .withSuccessHandler(successHandler)
+                    .withFailureHandler(errorHandler)
+                    .updateRecord(config.sheetName, config.keys, parseInt(rowIndex), record);
+            } else {
+                // 등록
+                google.script.run
+                    .withSuccessHandler(successHandler)
+                    .withFailureHandler(errorHandler)
+                    .createRecord(config.sheetName, config.keys, record);
+            }
+        }
+
+        /**
+         * 삭제 실행 핸들러
+         */
+        function handleDelete() {
+            const rowIndex = document.getElementById('deleteRowIndex').value;
+            if (!rowIndex) return;
+            
+            const config = getCurrentConfig();
+
+            closeConfirmModal();
+            setLoading(true);
+
+            google.script.run
+                .withSuccessHandler((res) => {
+                    setLoading(false);
+                    loadData();
+                    if (res.error) {
+                        showMessage('삭제 실패: ' + res.error, 'error');
+                    } else {
+                        showMessage(res.message, 'success'); 
+                    }
+                })
+                .withFailureHandler((error) => {
+                    setLoading(false);
+                    showMessage('서버 통신 오류: ' + error, 'error');
+                })
+                .deleteRecord(config.sheetName, parseInt(rowIndex));
+        }
+        
+        /**
+         * 앱 초기화: 서버에서 탭 설정을 가져오고 UI를 구성합니다.
+         */
+        function initializeApp(shouldSwitchToFirstTab = false) {
+            setLoading(true);
+            google.script.run
+                .withSuccessHandler((configs) => {
+                    setLoading(false);
+                    if (configs.error) {
+                        showMessage('탭 설정 로딩 오류: ' + configs.error, 'error');
+                        switchView('admin');
+                        return;
+                    }
+
+                    // 1. 정적 관리자 탭 초기화 및 재설정
+                    viewConfigs = viewConfigs.filter(c => c.isAdmin);
+                    viewMap.clear();
+                    viewMap.set('admin', viewConfigs[0]);
+                    
+                    if (configs.length > 0) {
+                        configs.forEach(conf => {
+                            
+                            // ⭐️ [수정된 노출여부 필터링 로직] 공백 제거 및 대문자 변환으로 비교 강화
+                            const rawExposure = conf.exposure;
+                            const exposureStatus = (typeof rawExposure === 'string' ? rawExposure.trim() : rawExposure || '').toUpperCase();
+                            
+                            if (exposureStatus === 'N') {
+                                // 명시적으로 'N'이거나 공백을 제거한 값이 'N'이면 숨김 처리
+                                return; 
+                            }
+                            
+                            // headersStr를 배열로 변환
+                            const headersArray = conf.headersStr.split(',').map(h => h.trim()).filter(h => h.length > 0);
+                            
+                            // 동적 키 생성 (key1, key2, ...)
+                            const keysArray = headersArray.map((_, index) => `key${index + 1}`);
+
+                            const dynamicConfig = {
+                                viewName: conf.sheetName,
+                                title: conf.title,
+                                sheetName: conf.sheetName,
+                                headers: headersArray,
+                                keys: keysArray,
+                                order: conf.order,
+                                exposure: exposureStatus || 'Y', // 실제 노출 상태 저장
+                                placeholder: `${conf.title} 검색...`,
+                                formFields: headersArray.map((header, index) => ({
+                                    key: keysArray[index],
+                                    label: header,
+                                    type: 'text',
+                                    required: true
+                                }))
+                            };
+                            viewConfigs.push(dynamicConfig);
+                            viewMap.set(dynamicConfig.viewName, dynamicConfig);
+                        });
+
+                        // 순서대로 정렬 (관리자 탭 포함)
+                        viewConfigs.sort((a, b) => a.order - b.order);
+                        
+                        // 현재 뷰 설정
+                        const firstDataTab = viewConfigs.find(c => !c.isAdmin);
+                        
+                        if (shouldSwitchToFirstTab || !currentView || currentView === 'admin') {
+                            if (firstDataTab) {
+                                switchView(firstDataTab.viewName);
+                            } else {
+                                switchView('admin'); // 데이터 탭이 없으면 관리자 탭으로 이동
+                            }
+                        } else {
+                            // 기존 뷰 유지 및 탭 새로고침
+                            renderTabs();
+                        }
+                    } else {
+                        // 설정된 탭이 없으면 관리자 뷰로 이동
+                        switchView('admin');
+                        showMessage('Google Sheet에서 탭 설정(SHEET_DATA)을 로드하지 못했습니다. 관리자 탭에서 시트를 등록하거나 SHEET_DATA 시트에 샘플 데이터를 추가하십시오.', 'blue');
+                    }
+                })
+                .withFailureHandler((error) => {
+                    setLoading(false);
+                    showMessage('앱 초기화 실패: ' + error, 'error');
+                    switchView('admin');
+                })
+                .getSheetConfigs();
+        }
+
+        // --- 이벤트 리스너 설정 ---
+        document.getElementById('add-btn').addEventListener('click', () => openModal());
+        document.getElementById('close-modal-btn').addEventListener('click', closeModal);
+        document.getElementById('cancel-delete-btn').addEventListener('click', closeConfirmModal);
+        document.getElementById('confirm-delete-btn').addEventListener('click', handleDelete);
+        crudForm.addEventListener('submit', handleFormSubmit);
+
+        searchBtn.addEventListener('click', loadData);
+        searchInput.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') {
+                e.preventDefault(); 
+                loadData();
+            }
+        });
+
+        // ESC 키로 모달 닫기
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape') {
+                if (modal.classList.contains('flex')) closeModal();
+                if (confirmModal.classList.contains('flex')) closeConfirmModal();
+            }
+        });
+
+        // 모달 외부 클릭으로 닫기
+        modal.addEventListener('click', (e) => {
+            if (e.target === modal) closeModal();
+        });
+        confirmModal.addEventListener('click', (e) => {
+            if (e.target === confirmModal) closeConfirmModal();
+        });
+
+        // 페이지 로드 시 앱 초기화
+        window.onload = () => {
+            initializeApp();
+        };
+
+    </script>
+</body>
+</html>
